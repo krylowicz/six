@@ -1,7 +1,7 @@
 from sdv.evaluation import evaluate 
+from sdv.metrics.tabular import LogisticDetection,NumericalMLP,CSTest,KSTest,BinaryLogisticRegression,ContinuousKLDivergence,DiscreteKLDivergence
 import numpy as np
-from sdv.metrics.tabular import LogisticDetection,NumericalMLP,CSTest,KSTest,MulticlassMLPClassifier
-from sdv.metrics.timeseries import LSTMDetection, TSFCDetection,TSFClassifierEfficacy
+import pandas as pd
 from prettytable import PrettyTable
 
 class Evaluation:
@@ -52,46 +52,43 @@ class Evaluation:
                 print(i)
                 
     
-    def table(self,target_column, keys):        
+    def table(self,target_column,cat_target,keys):        
         
         """
           target_colum = the column an attacker will try to predict
-          keys = list of columns an attacker will use for predicting the target column (if the target column is categorical then the keys need to be categorical)     
-          r: gives overall score on the given tests, this constitutes the resemblance score.
-          u: trains MulticlassMLPClassifier on the real data and later uses it to evaluate the syntethic data (TRTS)
-             This gives the utility score.
-          p: Gives the privacy score with the NumericalMLP method.
+          cat_target= categorical target, it must be binary.
+          keys = list of columns an attacker will use for predicting the target column, the key columns need to be the same object type
+          as the target_column.
           
+          Returns: Table of the scores for each evaluation category: resemblance, utility and privacy.
         """ 
         
-        r1=CSTest.compute(self.real,self.synthetic)
-        r2=KSTest.compute(self.real,self.synthetic)
-        r3=LogisticDetection.compute(self.real,self.synthetic)
-        u=MulticlassMLPClassifier.compute(self.real,self.synthetic,target=target_column)
-        p=NumericalMLP.compute(self.real, self.synthetic,sensitive_fields=[target_column],key_fields=keys)
+        resemblance_1=KSTest.compute(self.real,self.synthetic)
+        print("(1/7) Kolmogorov–Smirnov test...",resemblance_1)
+        resemblance_2=CSTest.compute(self.real,self.synthetic)
+        print("(2/7) Chi–Squared test...",resemblance_2)              
+        resemblance_3=ContinuousKLDivergence.compute(self.real,self.synthetic)
+        print("(3/7) ContinuousKLDivergence...",resemblance_3)
+        resemblance_4=DiscreteKLDivergence.compute(self.real,self.synthetic)
+        print("(4/7) DiscreteKLDivergence...",resemblance_4)
+        resemblance_5=LogisticDetection.compute(self.real,self.synthetic)
+        print("(5/7) Logistic Detection...",resemblance_5)
         
+       
+        utility=BinaryLogisticRegression.compute(self.real,self.synthetic,target=cat_target)
+        print("(6/7) Binary Logistic Regression...",utility)
+
+        privacy=NumericalMLP.compute(self.real, self.synthetic,sensitive_fields=[target_column],key_fields=keys)
+        print("(7/7) Numerical Multi-Layer Perceptron...",privacy)
+        
+        df = pd.merge(self.real, self.synthetic, how='outer', indicator='Exist')
+        duplicates_df = df.loc[df['Exist'] == 'both']
+        duplicate_rows=duplicates_df.shape[0]
         
         evaluation_table=PrettyTable()
         evaluation_table.title="SCORES"          
-        evaluation_table.field_names=["Resemblance", "Utility (TRTS)","Privacy"]
-        evaluation_table.add_row([round((r1+r2+r3)/3,2),round(u,2),round(p,2)])
-        
-        
-        
-        evaluation_b=PrettyTable()
-        evaluation_b.title="SCORES BREAKDOWN"          
-        evaluation_b.field_names=["Resemblance", "R_scores","Utility","Privacy"]
-        evaluation_b.add_row(["Chi-S-Test\n K-S-Test\n LogisticDetection","{}\n{}\n{}".format(round(r1,2),
-                              round(r2,2),
-                              round(r3,2)),
-                              "Multi-layer Perceptron classifier\n feature to predict: {}".format(target_column),
-                              "Numerical Multi-layer Perceptron\n feature to predict: {}\n used features: {}".format(target_column,keys)
-                              ])
-        
-        print("All scores fall in the range 0-1")
-        print("One being the best score on the three categories.")
+        evaluation_table.field_names=["Resemblance", "Utility (TRTS)","Privacy","score_range","Goal","duplicate_rows"]
+        evaluation_table.add_row([round((resemblance_1+resemblance_2+resemblance_3+resemblance_4+resemblance_5)/5,2),
+                                  round(utility,2),round(privacy,2),"(0,1)","Maximize",duplicate_rows])          
         print(evaluation_table)
-        print(evaluation_b)
         
-    
-    
